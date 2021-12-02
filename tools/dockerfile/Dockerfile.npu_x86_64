@@ -11,9 +11,6 @@
 # -t paddlepaddle/paddle:latest-dev-5.0.2.alpha005-gcc82-x86_64 .
 #
 # docker run -it --pids-limit 409600 \
-# -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
-# -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
-# -v /usr/local/dcmi:/usr/local/dcmi \
 # paddlepaddle/paddle:latest-dev-5.0.2.alpha005-gcc82-x86_64 /bin/bash
 
 FROM ubuntu:18.04
@@ -128,9 +125,9 @@ RUN groupadd HwHiAiUser && \
 # copy /etc/ascend_install.info to current dir fist
 COPY ascend_install.info /etc/ascend_install.info
 
-# copy /usr/local/Ascend/driver/version.info to current dir fist
-RUN mkdir -p /usr/local/Ascend/driver
-COPY version.info /usr/local/Ascend/driver/version.info
+# copy /usr/local/Ascend/driver to current dir fist
+RUN mkdir -p /usr/local/Ascend
+COPY driver /usr/local/Ascend/driver
 
 # Download packages from https://www.hiascend.com/software/cann/community and copy them to current dir first
 WORKDIR /usr/local/Ascend
@@ -169,7 +166,6 @@ ENV ASCEND_OPP_PATH=/usr/local/Ascend/nnae/latest/opp
 # DEV image should open error level log
 # 0 debug; 1 info; 2 warning; 3 error; 4 null
 ENV ASCEND_GLOBAL_LOG_LEVEL=3
-RUN rm -rf /usr/local/Ascend/driver
 
 # Clean
 RUN apt-get clean -y
