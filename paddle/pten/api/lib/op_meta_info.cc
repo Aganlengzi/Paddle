@@ -50,6 +50,25 @@ OpMetaInfo& OpMetaInfo::SetInferDtypeFn(InferDtypeFunc&& func) {
   return *this;
 }
 
+////////////////////// Kernel Meta Info //////////////////////
+
+KernelMetaInfo& KernelMetaInfo::Inputs(std::vector<std::string>&& inputs) {
+  inputs_ = std::forward<std::vector<std::string>>(inputs);
+  return *this;
+}
+KernelMetaInfo& KernelMetaInfo::Outputs(std::vector<std::string>&& outputs) {
+  outputs_ = std::forward<std::vector<std::string>>(outputs);
+  return *this;
+}
+KernelMetaInfo& KernelMetaInfo::Attrs(std::vector<std::string>&& attrs) {
+  attrs_ = std::forward<std::vector<std::string>>(attrs);
+  return *this;
+}
+KernelMetaInfo& KernelMetaInfo::SetKernelFn(KernelFunc&& func) {
+  kernel_fn_ = std::forward<KernelFunc>(func);
+  return *this;
+}
+
 //////////////// Op Meta Info Map /////////////////
 
 std::vector<OpMetaInfo>& OpMetaInfoMap::operator[](const std::string& name) {
@@ -58,6 +77,17 @@ std::vector<OpMetaInfo>& OpMetaInfoMap::operator[](const std::string& name) {
 
 const std::unordered_map<std::string, std::vector<OpMetaInfo>>&
 OpMetaInfoMap::GetMap() const {
+  return map_;
+}
+
+//////////////// Kernel Meta Info Map /////////////////
+
+std::vector<KernelMetaInfo>& KernelMetaInfoMap::operator[](const std::string& name) {
+  return map_[name];
+}
+
+const std::unordered_map<std::string, std::vector<KernelMetaInfo>>&
+KernelMetaInfoMap::GetMap() const {
   return map_;
 }
 
@@ -145,6 +175,72 @@ OpMetaInfoBuilder& OpMetaInfoBuilder::SetInferDtypeFn(InferDtypeFunc func) {
   return *this;
 }
 
+//////////////// Kernel Meta Info Builder /////////////////
+
+KernelMetaInfoBuilder::KernelMetaInfoBuilder(std::string&& op_name,
+                                             const std::string& backend,
+                                             const std::string& data_layout,
+                                             const std::string& data_type) {
+  // 1. member assign
+  if (backend == "CPU") {
+    backend_ = pten::Backend::CPU;
+  }
+  if (data_layout == "ANY") {
+    layout_ = pten::DataLayout::ANY;
+  }
+  if (data_type == "float") {
+    dtype_ = pten::DataType::FLOAT32;
+  }
+  op_name_ = std::forward<std::string>(op_name);
+
+  // 2. check and meta info build
+  auto& info_vector = KernelMetaInfoMap::Instance()[op_name_];
+  auto kernel_meta = KernelMetaInfo(op_name_, backend_, layout_, dtype_);
+  info_vector.emplace_back(std::move(kernel_meta));
+  // 3. get current info ptr
+  info_ptr_ = &(info_vector.back());
+}
+
+KernelMetaInfoBuilder::KernelMetaInfoBuilder(std::string&& op_name,
+                                             pten::Backend backend,
+                                             pten::DataLayout data_layout,
+                                             pten::DataType data_type) {
+  // 1. member assign
+  op_name_ = std::forward<std::string>(op_name);
+  backend_ = backend;
+  layout_ = data_layout;
+  dtype_ = data_type;
+
+  // 2. check and meta info build
+  auto& info_vector = KernelMetaInfoMap::Instance()[op_name_];
+  auto kernel_meta = KernelMetaInfo(op_name_, backend_, layout_, dtype_);
+  info_vector.emplace_back(std::move(kernel_meta));
+  // 3. get current info ptr
+  info_ptr_ = &(info_vector.back());
+}
+
+KernelMetaInfoBuilder& KernelMetaInfoBuilder::Inputs(
+    std::vector<std::string>&& inputs) {
+  info_ptr_->Inputs(std::forward<std::vector<std::string>>(inputs));
+  return *this;
+}
+
+KernelMetaInfoBuilder& KernelMetaInfoBuilder::Outputs(
+    std::vector<std::string>&& outputs) {
+  info_ptr_->Outputs(std::forward<std::vector<std::string>>(outputs));
+  return *this;
+}
+
+KernelMetaInfoBuilder& KernelMetaInfoBuilder::Attrs(std::vector<std::string>&& attrs) {
+  info_ptr_->Attrs(std::forward<std::vector<std::string>>(attrs));
+  return *this;
+}
+
+KernelMetaInfoBuilder& KernelMetaInfoBuilder::SetKernelFn(KernelFunc func) {
+  info_ptr_->SetKernelFn(std::forward<KernelFunc>(func));
+  return *this;
+}
+
 /////////////////////// Op register API /////////////////////////
 
 void RegisterAllCustomOperator() {
@@ -155,6 +251,18 @@ void RegisterAllCustomOperator() {
 void LoadCustomOperatorLib(const std::string& dso_name) {
   paddle::framework::LoadOpMetaInfoAndRegisterOp(dso_name);
 }
+
+/////////////////////// Kernel register API /////////////////////////
+
+void RegisterAllCustomKernel() {
+  auto& kernel_meta_info_map = KernelMetaInfoMap::Instance();
+  framework::RegisterKernelWithMetaInfoMap(kernel_meta_info_map);
+}
+
+void LoadCustomKernelLib(const std::string& dso_name) {
+  paddle::framework::LoadKernelMetaInfoAndRegisterKernel(dso_name);
+}
+
 }  // namespace paddle
 
 #ifdef __cplusplus
@@ -165,6 +273,10 @@ extern "C" {
 // C-API to get global OpMetaInfoMap.
 paddle::OpMetaInfoMap& PD_GetOpMetaInfoMap() {
   return paddle::OpMetaInfoMap::Instance();
+}
+// C-API to get global KernelMetaInfoMap.
+paddle::KernelMetaInfoMap& PD_GetKernelMetaInfoMap() {
+  return paddle::KernelMetaInfoMap::Instance();
 }
 #endif
 

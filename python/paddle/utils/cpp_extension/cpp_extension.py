@@ -200,7 +200,8 @@ def setup(**attr):
     attr['zip_safe'] = False
 
     # switch `write_stub` to inject paddle api in .egg
-    with bootstrap_context():
+    is_kernel = attr.get('is_kernel', False)
+    with bootstrap_context(is_kernel):
         setuptools.setup(**attr)
 
 
@@ -440,7 +441,10 @@ class BuildExtension(build_ext, object):
                 # so we add this flag to ensure the symbol names from user compiled
                 # shared library have same ABI suffix with core_(no)avx.so.
                 # See https://stackoverflow.com/questions/34571583/understanding-gcc-5s-glibcxx-use-cxx11-abi-or-the-new-abi
-                add_compile_flag(['-D_GLIBCXX_USE_CXX11_ABI=1'], cflags)
+                if core.is_compiled_with_npu():
+                    add_compile_flag(['-D_GLIBCXX_USE_CXX11_ABI=0'], cflags)
+                else:
+                    add_compile_flag(['-D_GLIBCXX_USE_CXX11_ABI=1'], cflags)
                 # Append this macor only when jointly compiling .cc with .cu
                 if not is_cuda_file(src) and self.contain_cuda_file:
                     if core.is_compiled_with_rocm():
@@ -740,7 +744,8 @@ def load(name,
          extra_ldflags=None,
          extra_include_paths=None,
          build_directory=None,
-         verbose=False):
+         verbose=False,
+         is_kernel=False):
     """
     An Interface to automatically compile C++/CUDA source files Just-In-Time
     and return callable python function as other Paddle layers API. It will
@@ -856,7 +861,7 @@ def load(name,
                       extra_ldflags, verbose)
     _jit_compile(file_path, verbose)
 
-    # import as callable python api
-    custom_op_api = _import_module_from_library(name, build_base_dir, verbose)
+    # import as callable python api or kernel
+    custom_op_api = _import_module_from_library(name, build_base_dir, verbose, is_kernel)
 
     return custom_op_api

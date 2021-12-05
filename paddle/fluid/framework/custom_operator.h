@@ -31,5 +31,15 @@ void RegisterOperatorWithMetaInfoMap(
 // Interface for selective register custom op.
 void RegisterOperatorWithMetaInfo(const std::vector<OpMetaInfo>& op_meta_infos);
 
+// Load custom kernel api: register kernel after user compiled
+void LoadKernelMetaInfoAndRegisterKernel(const std::string& dso_name);
+
+// Register custom kernel api: register kernel directly
+void RegisterKernelWithMetaInfoMap(
+    const paddle::KernelMetaInfoMap& kernel_meta_info_map);
+
+// Interface for selective register custom kernel.
+void RegisterKernelWithMetaInfo(const std::vector<KernelMetaInfo>& kernel_meta_infos);
+
 }  // namespace framework
 }  // namespace paddle

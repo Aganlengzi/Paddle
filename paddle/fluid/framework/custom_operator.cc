@@ -27,6 +27,7 @@ limitations under the License. */
 
 #include "paddle/fluid/framework/attribute.h"
 #include "paddle/fluid/framework/op_meta_info_helper.h"
+#include "paddle/fluid/framework/kernel_meta_info_helper.h"
 #include "paddle/fluid/framework/op_registry.h"
 #include "paddle/fluid/framework/operator.h"
 #include "paddle/fluid/framework/pten_utils.h"
@@ -185,9 +186,11 @@ static void RunKernelFunc(const framework::ExecutionContext& ctx,
     }
   }
 
+  //TODO: 此处或许应该直接给外部DeviceContext
+  auto stream = ctx.template device_context<paddle::platform::NPUDeviceContext>().stream();
   VLOG(1) << "Custom Operator: Run ComputeFunc.";
   try {
-    auto outs = func(custom_ins, custom_vec_ins, custom_attrs);
+    auto outs = func(custom_ins, custom_vec_ins, custom_attrs, stream);
 
     VLOG(1) << "Custom Operator: Share outputs into ExecutionContext.";
     for (size_t i = 0; i < outputs.size(); ++i) {
@@ -512,6 +515,22 @@ void RegisterOperatorKernel(const std::string& name,
   RegisterOperatorKernelWithPlace(name, kernel_func, proto::VarType::RAW,
                                   PlaceType::kGPU, inputs, outputs, attrs);
 #endif
+}
+
+void RegisterCustomKernel(const std::string& name,
+                          const pten::KernelKey& kernel_key,
+                          const paddle::KernelFunc& kernel_func,
+                          const std::vector<std::string>& inputs,
+                          const std::vector<std::string>& outputs,
+                          const std::vector<std::string>& attrs) {
+  auto key = TransPtenKernelKeyToOpKernelType(kernel_key);
+  VLOG(1) << "Custom Kernel: op kernel name: " << name << " key: " << key;
+  OperatorWithKernel::AllOpKernels()[name][key] =
+      [kernel_func, inputs, outputs,
+       attrs](const framework::ExecutionContext& ctx) {
+        VLOG(1) << "Custom Operator: run custom kernel func in lambda.";
+        RunKernelFunc(ctx, kernel_func, inputs, outputs, attrs);
+      };
 }
 
 void RegisterOperatorWithMetaInfo(
@@ -857,6 +876,26 @@ void RegisterOperatorWithMetaInfo(
   OpInfoMap::Instance().Insert(cur_op_name, info);
 }
 
+void RegisterKernelWithMetaInfo(
+    const std::vector<KernelMetaInfo>& kernel_meta_infos) {
+  for (size_t i = 0; i < kernel_meta_infos.size(); ++i) {
+    auto& meta_info = kernel_meta_infos[i];
+    auto op_name = KernelMetaInfoHelper::GetOpName(meta_info);
+    // check op exists
+    if (!OpInfoMap::Instance().Has(op_name)) {
+      LOG(WARNING) << "Operator (" << op_name << ") not exsits.";
+      return;
+    }
+    // kernel infomation
+    auto kernel_key = KernelMetaInfoHelper::GetKernelKey(meta_info);
+    auto& kernel_fn = KernelMetaInfoHelper::GetKernelFn(meta_info);
+    auto& inputs = KernelMetaInfoHelper::GetInputs(meta_info);
+    auto& outputs = KernelMetaInfoHelper::GetOutputs(meta_info);
+    auto& attrs = KernelMetaInfoHelper::GetAttrs(meta_info);
+    RegisterCustomKernel(op_name, kernel_key, kernel_fn, inputs, outputs, attrs);
+  }
+}
+
 void RegisterOperatorWithMetaInfoMap(
     const paddle::OpMetaInfoMap& op_meta_info_map) {
   auto& meta_info_map = op_meta_info_map.GetMap();
@@ -866,6 +905,18 @@ void RegisterOperatorWithMetaInfoMap(
   for (auto& pair : meta_info_map) {
     VLOG(1) << "Custom Operator: pair first -> op name: " << pair.first;
     RegisterOperatorWithMetaInfo(pair.second);
+  }
+}
+
+void RegisterKernelWithMetaInfoMap(
+    const paddle::KernelMetaInfoMap& kernel_meta_info_map) {
+  auto& meta_info_map = kernel_meta_info_map.GetMap();
+  VLOG(1) << "Custom Kernel: size of kernel meta info map - "
+          << meta_info_map.size();
+  // pair: {op_type, KernelMetaInfo}
+  for (auto& pair : meta_info_map) {
+    VLOG(1) << "Custom Kernel: pair first -> op name: " << pair.first;
+    RegisterKernelWithMetaInfo(pair.second);
   }
 }
 
@@ -881,6 +932,18 @@ void LoadOpMetaInfoAndRegisterOp(const std::string& dso_name) {
   auto& op_meta_info_map = get_op_meta_info_map();
 
   RegisterOperatorWithMetaInfoMap(op_meta_info_map);
+}
+
+// load kernel api
+void LoadKernelMetaInfoAndRegisterKernel(const std::string& dso_name) {
+  void* handle = paddle::platform::dynload::GetKernelDsoHandle(dso_name);
+  VLOG(1) << "load custom_kernel lib: " << dso_name;
+  typedef KernelMetaInfoMap& get_kernel_meta_info_map_t();
+  auto* get_kernel_meta_info_map =
+      detail::DynLoad<get_kernel_meta_info_map_t>(handle, "PD_GetKernelMetaInfoMap");
+  auto& kernel_meta_info_map = get_kernel_meta_info_map();
+
+  RegisterKernelWithMetaInfoMap(kernel_meta_info_map);
 }
 
 }  // namespace framework

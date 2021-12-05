@@ -34,6 +34,7 @@ limitations under the License. */
 namespace paddle {
 namespace framework {
 class PD_DLL_DECL OpMetaInfoHelper;
+class PD_DLL_DECL KernelMetaInfoHelper;
 }  // namespace framework
 
 using Tensor = paddle::Tensor;
@@ -82,7 +83,7 @@ inline std::string Vec(const std::string& t_name) {
 using KernelFunc =
     std::vector<Tensor> (*)(const std::vector<Tensor>& inputs,
                             const std::vector<std::vector<Tensor>>& vec_inputs,
-                            const std::vector<paddle::any>& attrs);
+                            const std::vector<paddle::any>& attrs, void* stream);
 
 #define PD_SPECIALIZE_ComputeCallHelper(attr_type)                            \
   template <typename... Tail>                                                 \
@@ -90,22 +91,47 @@ using KernelFunc =
     template <int in_idx,                                                     \
               int vec_in_idx,                                                 \
               int attr_idx,                                                   \
+              int stream_idx,                                                 \
               typename... PreviousArgs>                                       \
     static Return Compute(const std::vector<Tensor>& inputs,                  \
                           const std::vector<std::vector<Tensor>>& vec_inputs, \
                           const std::vector<paddle::any>& attrs,              \
+                          void* stream,                                       \
                           const PreviousArgs&... pargs) {                     \
       try {                                                                   \
         attr_type arg = paddle::any_cast<attr_type>(attrs[attr_idx]);         \
         return ComputeCallHelper<Tail...>::template Compute<in_idx,           \
                                                             vec_in_idx,       \
-                                                            attr_idx + 1>(    \
-            inputs, vec_inputs, attrs, pargs..., arg);                        \
+                                                            attr_idx + 1,     \
+                                                            stream_idx>(      \
+            inputs, vec_inputs, attrs, stream, pargs..., arg);                \
       } catch (paddle::bad_any_cast&) {                                       \
         PD_THROW(                                                             \
             "Attribute cast error in custom operator. Expected " #attr_type   \
             " value.");                                                       \
       }                                                                       \
+    }                                                                         \
+  }
+
+#define PD_SPECIALIZE_ComputeCallHelper1(stream_type)                         \
+  template <typename... Tail>                                                 \
+  struct ComputeCallHelper<stream_type, Tail...> {                            \
+    template <int in_idx,                                                     \
+              int vec_in_idx,                                                 \
+              int attr_idx,                                                   \
+              int stream_idx,                                                 \
+              typename... PreviousArgs>                                       \
+    static Return Compute(const std::vector<Tensor>& inputs,                  \
+                          const std::vector<std::vector<Tensor>>& vec_inputs, \
+                          const std::vector<paddle::any>& attrs,              \
+                          void* stream,                                       \
+                          const PreviousArgs&... pargs) {                     \
+        stream_type arg = stream;                                             \
+        return ComputeCallHelper<Tail...>::template Compute<in_idx,           \
+                                                            vec_in_idx,       \
+                                                            attr_idx,         \
+                                                            stream_idx + 1>(  \
+            inputs, vec_inputs, attrs, stream, pargs..., arg);                \
     }                                                                         \
   }
 
@@ -119,9 +145,9 @@ template <typename Return, typename... Args, Return (*impl_fn)(Args...)>
 struct KernelFuncImpl<Return (*)(Args...), impl_fn> {
   static Return Compute(const std::vector<Tensor>& inputs,
                         const std::vector<std::vector<Tensor>>& vec_inputs,
-                        const std::vector<paddle::any>& attrs) {
-    return ComputeCallHelper<Args..., TypeTag<int>>::template Compute<0, 0, 0>(
-        inputs, vec_inputs, attrs);
+                        const std::vector<paddle::any>& attrs, void* stream) {
+    return ComputeCallHelper<Args..., TypeTag<int>>::template Compute<0, 0, 0, 0>(
+        inputs, vec_inputs, attrs, stream);
   }
 
  private:
@@ -133,16 +159,19 @@ struct KernelFuncImpl<Return (*)(Args...), impl_fn> {
     template <int in_idx,
               int vec_in_idx,
               int attr_idx,
+              int stream_idx,                                                   \
               typename... PreviousArgs>
     static Return Compute(const std::vector<Tensor>& inputs,
                           const std::vector<std::vector<Tensor>>& vec_inputs,
                           const std::vector<paddle::any>& attrs,
+                          void* stream,
                           const PreviousArgs&... pargs) {
       const Tensor& arg = inputs[in_idx];
       return ComputeCallHelper<Tail...>::template Compute<in_idx + 1,
                                                           vec_in_idx,
-                                                          attr_idx>(
-          inputs, vec_inputs, attrs, pargs..., arg);
+                                                          attr_idx,
+                                                          stream_idx>(
+          inputs, vec_inputs, attrs, stream, pargs..., arg);
     }
   };
 
@@ -151,16 +180,19 @@ struct KernelFuncImpl<Return (*)(Args...), impl_fn> {
     template <int in_idx,
               int vec_in_idx,
               int attr_idx,
+              int stream_idx,                                                   \
               typename... PreviousArgs>
     static Return Compute(const std::vector<Tensor>& inputs,
                           const std::vector<std::vector<Tensor>>& vec_inputs,
                           const std::vector<paddle::any>& attrs,
+                          void* stream,
                           const PreviousArgs&... pargs) {
       const std::vector<Tensor>& arg = vec_inputs[vec_in_idx];
       return ComputeCallHelper<Tail...>::template Compute<in_idx,
                                                           vec_in_idx + 1,
-                                                          attr_idx>(
-          inputs, vec_inputs, attrs, pargs..., arg);
+                                                          attr_idx,
+                                                          stream_idx>(
+          inputs, vec_inputs, attrs, stream, pargs..., arg);
     }
   };
 
@@ -191,13 +223,16 @@ struct KernelFuncImpl<Return (*)(Args...), impl_fn> {
   PD_SPECIALIZE_ComputeCallHelper(std::vector<int64_t>);
   PD_SPECIALIZE_ComputeCallHelper(std::vector<std::string>);
 
+  PD_SPECIALIZE_ComputeCallHelper1(void*);
+
   // end: base template
   template <typename T>
   struct ComputeCallHelper<TypeTag<T>> {
-    template <int in_idx, int vec_in_idx, int attr_idx>
+    template <int in_idx, int vec_in_idx, int attr_idx, int stream_idx>
     static Return Compute(const std::vector<Tensor>& inputs,
                           const std::vector<std::vector<Tensor>>& vec_inputs,
                           const std::vector<paddle::any>& attrs,
+                          void* stream,
                           const Args&... args) {
       return impl_fn(args...);
     }
@@ -462,6 +497,47 @@ class PD_DLL_DECL OpMetaInfo {
   InferDtypeFunc infer_dtype_fn_{nullptr};
 };
 
+////////////////////// Kernel Meta Info //////////////////////
+
+class PD_DLL_DECL KernelMetaInfo {
+ public:
+  explicit KernelMetaInfo(const std::string& op_name,
+                          pten::Backend backend,
+                          pten::DataLayout data_layout,
+                          pten::DataType data_type) : op_name_(op_name),
+      backend_(backend), layout_(data_layout), dtype_(data_type) {}
+
+  // format: {"<name1>", "<name2>", ...}
+  KernelMetaInfo& Inputs(std::vector<std::string>&& inputs);
+
+  // format: {"<name1>", "<name2>", ...}
+  KernelMetaInfo& Outputs(std::vector<std::string>&& outputs);
+
+  // format: {"<name1>:<type1>", "<name1>:<type1>", ...}
+  KernelMetaInfo& Attrs(std::vector<std::string>&& attrs);
+
+  // format: PD_KERNEL(...)
+  KernelMetaInfo& SetKernelFn(KernelFunc&& func);
+
+ private:
+  friend class framework::KernelMetaInfoHelper;
+
+  // 1. op name
+  std::string op_name_;
+
+  // 2. kernel key info
+  pten::Backend backend_{pten::Backend::UNDEFINED};
+  pten::DataLayout layout_{pten::DataLayout::UNDEFINED};
+  pten::DataType dtype_{pten::DataType::UNDEFINED};
+
+  std::vector<std::string> inputs_;
+  std::vector<std::string> outputs_;
+  std::vector<std::string> attrs_;
+
+  // 3. func info
+  KernelFunc kernel_fn_{nullptr};
+};
+
 //////////////// Op Meta Info Map /////////////////
 
 class PD_DLL_DECL OpMetaInfoMap {
@@ -486,6 +562,30 @@ class PD_DLL_DECL OpMetaInfoMap {
   PD_DISABLE_COPY_AND_ASSIGN(OpMetaInfoMap);
 };
 
+//////////////// Kernel Meta Info Map /////////////////
+
+class PD_DLL_DECL KernelMetaInfoMap {
+ public:
+  // this function's impl should keep in header file.
+  // if move to cc file, meta info can not be added
+  // into map
+  static KernelMetaInfoMap& Instance() {
+    static KernelMetaInfoMap g_custom_kernel_meta_info_map;
+    return g_custom_kernel_meta_info_map;
+  }
+
+  std::vector<KernelMetaInfo>& operator[](const std::string& name);
+
+  const std::unordered_map<std::string, std::vector<KernelMetaInfo>>& GetMap()
+      const;
+
+ private:
+  KernelMetaInfoMap() = default;
+  std::unordered_map<std::string, std::vector<KernelMetaInfo>> map_;
+
+  PD_DISABLE_COPY_AND_ASSIGN(KernelMetaInfoMap);
+};
+
 //////////////// Op Meta Info Builder /////////////////
 
 class PD_DLL_DECL OpMetaInfoBuilder {
@@ -508,6 +608,34 @@ class PD_DLL_DECL OpMetaInfoBuilder {
   size_t index_;
 };
 
+//////////////// Kernel Meta Info Builder /////////////////
+
+class PD_DLL_DECL KernelMetaInfoBuilder {
+ public:
+  explicit KernelMetaInfoBuilder(std::string&& op_name, const std::string& backend,
+                                 const std::string& data_layout,
+                                 const std::string& data_type);
+  explicit KernelMetaInfoBuilder(std::string&& op_name, pten::Backend backend,
+                                 pten::DataLayout data_layout,
+                                 pten::DataType data_type);
+  KernelMetaInfoBuilder& Inputs(std::vector<std::string>&& inputs);
+  KernelMetaInfoBuilder& Outputs(std::vector<std::string>&& outputs);
+  KernelMetaInfoBuilder& Attrs(std::vector<std::string>&& attrs);
+  KernelMetaInfoBuilder& SetKernelFn(KernelFunc func);
+
+ private:
+  // op name
+  std::string op_name_;
+
+  // kernel key info
+  pten::Backend backend_{pten::Backend::UNDEFINED};
+  pten::DataLayout layout_{pten::DataLayout::UNDEFINED};
+  pten::DataType dtype_{pten::DataType::UNDEFINED};
+
+  // ref current info ptr
+  KernelMetaInfo* info_ptr_;
+};
+
 /////////////////////// Op register API /////////////////////////
 
 // For inference: compile directly with framework
@@ -518,6 +646,16 @@ void RegisterAllCustomOperator();
 // register Custom
 // Operator into it
 void LoadCustomOperatorLib(const std::string& dso_name);
+
+/////////////////////// Kernel register API /////////////////////////
+
+// For inference: compile directly with framework
+// Call after PD_REGISTER_KERNEL(...)
+void RegisterAllCustomKernel();
+
+// Using this api to load compiled custom kernel's dynamic library and
+// register Custom Kernel inside
+void LoadCustomKernelLib(const std::string& dso_name);
 
 /////////////////////// Op register Macro /////////////////////////
 
@@ -541,6 +679,20 @@ void LoadCustomOperatorLib(const std::string& dso_name);
   static ::paddle::OpMetaInfoBuilder __grad_grad_op_meta_info_##op_name##__ = \
       ::paddle::OpMetaInfoBuilder(#op_name, 2)
 
+/////////////////////// Kernel register Macro /////////////////////////
+
+// PD_REGISTER_KERNEL(op_name, MY_DEVICE, NCHW, float)
+//     .Inputs({"X"}, {"Y"})
+//     .Outputs({"Out"})
+//     .Attrs({"axis"})
+//     .SetKernelFn(PD_KERNEL(CustomKernelFunc<float>));
+
+#define PD_REGISTER_KERNEL(op_name, device, layout, dtype)                     \
+  STATIC_ASSERT_GLOBAL_NAMESPACE(                                              \
+      __reg_kernel__##op_name_##device_##layout_##dtype, "PD_REGISTER_KERNEL must be called in global namespace."); \
+  static ::paddle::KernelMetaInfoBuilder __kernel_meta_info_##op_name_##device_##layout_##dtype =            \
+      ::paddle::KernelMetaInfoBuilder(#op_name, #device, #layout, #dtype)
+
 }  // namespace paddle
 
 ///////////////////// C API ///////////////////
@@ -553,6 +705,10 @@ extern "C" {
 // C-API to get global OpMetaInfoMap.
 __declspec(dllexport) inline paddle::OpMetaInfoMap& PD_GetOpMetaInfoMap() {
   return paddle::OpMetaInfoMap::Instance();
+}
+// C-API to get global KernelMetaInfoMap.
+__declspec(dllexport) inline paddle::KernelMetaInfoMap& PD_GetKernelMetaInfoMap() {
+  return paddle::KernelMetaInfoMap::Instance();
 }
 #endif  // _WIN32
 

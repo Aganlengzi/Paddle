@@ -532,6 +532,11 @@ void* GetOpDsoHandle(const std::string& dso_name) {
   return GetDsoHandleFromSearchPath(FLAGS_op_dir, dso_name);
 }
 
+// Using FLAGS_op_dir
+void* GetKernelDsoHandle(const std::string& dso_name) {
+  return GetDsoHandleFromSearchPath(FLAGS_op_dir, dso_name);
+}
+
 void* GetNvtxDsoHandle() {
 #if defined(__APPLE__) || defined(__OSX__)
   PADDLE_THROW(platform::errors::Unimplemented("Nvtx do not support Apple."));

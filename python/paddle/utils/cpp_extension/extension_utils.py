@@ -111,12 +111,15 @@ DEFAULT_OP_ATTR_NAMES = [
 
 
 @contextmanager
-def bootstrap_context():
+def bootstrap_context(is_kernel=False):
     """
     Context to manage how to write `__bootstrap__` code in .egg
     """
     origin_write_stub = bdist_egg.write_stub
-    bdist_egg.write_stub = custom_write_stub
+    if is_kernel:
+        bdist_egg.write_stub = custom_kernel_write_stub
+    else:
+        bdist_egg.write_stub = custom_operator_write_stub
     yield
 
     bdist_egg.write_stub = origin_write_stub
@@ -127,7 +130,41 @@ def load_op_meta_info_and_register_op(lib_filename):
     return OpProtoHolder.instance().update_op_proto()
 
 
-def custom_write_stub(resource, pyfile):
+def load_kernel_meta_info_and_register_kernel(lib_filename):
+    core.load_kernel_meta_info_and_register_kernel(lib_filename)
+
+
+def custom_kernel_write_stub(resource, pyfile):
+    """
+    Customized write_stub function to allow us to inject generated python
+    api codes into egg python file.
+    """
+    _stub_template = textwrap.dedent("""
+        import os
+        import paddle
+        
+        def __bootstrap__():
+            cur_dir = os.path.dirname(os.path.abspath(__file__))
+            so_path = os.path.join(cur_dir, "{resource}")
+
+            assert os.path.exists(so_path)
+
+            # load custom op shared library with abs path
+            paddle.utils.cpp_extension.load_kernel_meta_info_and_register_kernel(so_path)
+        
+        __bootstrap__()
+        """).lstrip()
+
+    # NOTE: To avoid importing .so file instead of python file because they have same name,
+    # we rename .so shared library to another name, see EasyInstallCommand.
+    filename, ext = os.path.splitext(resource)
+    resource = filename + "_pd_" + ext
+
+    with open(pyfile, 'w') as f:
+        f.write(_stub_template.format(resource=resource))
+
+
+def custom_operator_write_stub(resource, pyfile):
     """
     Customized write_stub function to allow us to inject generated python
     api codes into egg python file.
@@ -813,7 +850,7 @@ def parse_op_info(op_name):
     return in_names, out_names, attr_names
 
 
-def _import_module_from_library(module_name, build_directory, verbose=False):
+def _import_module_from_library(module_name, build_directory, verbose=False, is_kernel=False):
     """
     Load shared library and import it as callable python module.
     """
@@ -830,10 +867,14 @@ def _import_module_from_library(module_name, build_directory, verbose=False):
 
     # load custom op_info and kernels from .so shared library
     log_v('loading shared library from: {}'.format(ext_path), verbose)
-    op_names = load_op_meta_info_and_register_op(ext_path)
+    if is_kernel:
+        core.load_kernel_meta_info_and_register_kernel(ext_path)
+        return None
+    else:
+        op_names = load_op_meta_info_and_register_op(ext_path)
 
-    # generate Python api in ext_path
-    return _generate_python_module(module_name, op_names, build_directory,
+        # generate Python api in ext_path
+        return _generate_python_module(module_name, op_names, build_directory,
                                    verbose)
 
 
