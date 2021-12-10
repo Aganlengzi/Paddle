@@ -68,7 +68,7 @@ namespace ops = paddle::operators;
 namespace plat = paddle::platform;
 
 REGISTER_OP_NPU_KERNEL(
-    abs, ops::AbsNPUKernel<plat::NPUDeviceContext, float>,
+    abs, /*ops::AbsNPUKernel<plat::NPUDeviceContext, float>,*/
     ops::AbsNPUKernel<plat::NPUDeviceContext, plat::float16>);
 
 REGISTER_OP_NPU_KERNEL(

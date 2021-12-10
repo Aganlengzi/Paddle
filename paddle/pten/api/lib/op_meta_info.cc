@@ -185,6 +185,9 @@ KernelMetaInfoBuilder::KernelMetaInfoBuilder(std::string&& op_name,
   if (backend == "CPU") {
     backend_ = pten::Backend::CPU;
   }
+  if (backend == "NPU") {
+    backend_ = pten::Backend::NPU;
+  }
   if (data_layout == "ANY") {
     layout_ = pten::DataLayout::ANY;
   }

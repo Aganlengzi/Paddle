@@ -470,20 +470,20 @@ def _reset_so_rpath(so_path):
         run_cmd(cmd)
 
 
-def normalize_extension_kwargs(kwargs, use_cuda=False):
+def normalize_extension_kwargs(kwargs, use_cuda=False, use_ascend=False):
     """
     Normalize include_dirs, library_dir and other attributes in kwargs.
     """
     assert isinstance(kwargs, dict)
     # append necessary include dir path of paddle
     include_dirs = kwargs.get('include_dirs', [])
-    include_dirs.extend(find_paddle_includes(use_cuda))
+    include_dirs.extend(find_paddle_includes(use_cuda, use_ascend))
 
     kwargs['include_dirs'] = include_dirs
 
     # append necessary lib path of paddle
     library_dirs = kwargs.get('library_dirs', [])
-    library_dirs.extend(find_paddle_libraries(use_cuda))
+    library_dirs.extend(find_paddle_libraries(use_cuda, use_ascend))
     kwargs['library_dirs'] = library_dirs
 
     # append compile flags and check settings of compiler
@@ -503,6 +503,9 @@ def normalize_extension_kwargs(kwargs, use_cuda=False):
         extra_link_args.append('{}'.format(lib_core_name))
         if use_cuda:
             extra_link_args.extend(['cudadevrt.lib', 'cudart_static.lib'])
+        if use_ascend:
+            # TODO:
+            pass
         kwargs['extra_link_args'] = extra_link_args
 
     else:
@@ -529,12 +532,14 @@ def normalize_extension_kwargs(kwargs, use_cuda=False):
                 extra_link_args.append('-lamdhip64')
             else:
                 extra_link_args.append('-lcudart')
+        if use_ascend:
+            extra_link_args.append('-lacl_op_compiler')
 
         kwargs['extra_link_args'] = extra_link_args
 
         # add runtime library dirs
         runtime_library_dirs = kwargs.get('runtime_library_dirs', [])
-        runtime_library_dirs.extend(find_paddle_libraries(use_cuda))
+        runtime_library_dirs.extend(find_paddle_libraries(use_cuda, use_ascend))
         kwargs['runtime_library_dirs'] = runtime_library_dirs
 
     kwargs['extra_compile_args'] = extra_compile_args
@@ -651,6 +656,25 @@ def find_rocm_home():
     return rocm_home
 
 
+def find_ascend_home():
+    """
+    Use heuristic method to find ascend-toolkit latest path
+    """
+    # step 1. find in $ASCEND_HOME or $ASCEND_PATH
+    ascend_home = os.environ.get('ASCEND_HOME') or os.environ.get('ASCEND_PATH')
+
+    # step 2.  find path by `which nvcc`
+    if ascend_home is None:
+        ascend_home = "/usr/local/Ascend/ascend-toolkit/latest"
+
+    # step 3. check whether path is valid
+    if ascend_home and not os.path.exists(
+            ascend_home) and core.is_compiled_with_npu():
+        ascend_home = None
+
+    return ascend_home
+
+
 def find_cuda_includes():
     """
     Use heuristic method to find cuda include path
@@ -677,7 +701,23 @@ def find_rocm_includes():
     return [os.path.join(rocm_home, 'include')]
 
 
-def find_paddle_includes(use_cuda=False):
+def find_ascend_includes():
+    """
+    Use heuristic method to find ascend include path
+    """
+    ascend_home = find_ascend_home()
+    if ascend_home is None:
+        raise ValueError(
+            "Not found ASCEND runtime, please use `export ASCEND_HOME=XXX` to specific it."
+        )
+
+    return [
+        os.path.join(ascend_home, 'fwkacllib/include'),
+        os.path.join(ascend_home, 'acllib/include')
+        ]
+
+
+def find_paddle_includes(use_cuda=False, use_ascend=False):
     """
     Return Paddle necessary include dir path.
     """
@@ -693,6 +733,9 @@ def find_paddle_includes(use_cuda=False):
         else:
             cuda_include_dir = find_cuda_includes()
             include_dirs.extend(cuda_include_dir)
+    if use_ascend:
+        npu_include_dir = find_ascend_includes()
+        include_dirs.extend(npu_include_dir)
 
     if OS_NAME.startswith('darwin'):
         # NOTE(Aurelius84): Ensure to find std v1 headers correctly.
@@ -754,7 +797,24 @@ def find_rocm_libraries():
     return rocm_lib_dir
 
 
-def find_paddle_libraries(use_cuda=False):
+def find_ascend_libraries():
+    """
+    Use heuristic method to find ascend dynamic lib path
+    """
+    ascend_home = find_ascend_home()
+    if ascend_home is None:
+        raise ValueError(
+            "Not found Ascend runtime, please use `export ASCEND_PATH=XXX` to specific it."
+        )
+    ascend_lib_dir = [
+        os.path.join(ascend_home, 'acllib/lib64'),
+        os.path.join(ascend_home, 'fwkacllib/lib64'),
+        ]
+
+    return ascend_lib_dir
+
+
+def find_paddle_libraries(use_cuda=False, use_ascend=False):
     """
     Return Paddle necessary library dir path.
     """
@@ -768,6 +828,9 @@ def find_paddle_libraries(use_cuda=False):
         else:
             cuda_lib_dir = find_cuda_libraries()
             paddle_lib_dirs.extend(cuda_lib_dir)
+    if use_ascend:
+        ascend_lib_dir = find_ascend_libraries()
+        paddle_lib_dirs.extend(ascend_lib_dir)
 
     # add `paddle/fluid` to search `core_avx.so` or `core_noavx.so`
     paddle_lib_dirs.append(_get_fluid_path())

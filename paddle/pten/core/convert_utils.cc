@@ -90,6 +90,10 @@ paddle::platform::Place TransToFluidPlace(const Backend& backend) {
       return paddle::platform::CUDAPlace(
           paddle::platform::GetCurrentDeviceId());
 #endif
+#if defined(PADDLE_WITH_ASCEND_CL)
+    case pten::Backend::NPU:
+      return paddle::platform::NPUPlace();
+#endif
 #ifdef PADDLE_WITH_MKLDNN
     case pten::Backend::MKLDNN:
       return paddle::platform::CPUPlace();
