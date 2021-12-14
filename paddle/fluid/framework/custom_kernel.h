@@ -14,9 +14,23 @@ limitations under the License. */
 
 #pragma once
 
+#include <string>
+
+#include "paddle/pten/api/ext/kernel_meta_info.h"
+
 namespace paddle {
+namespace framework {
 
-// TODO(yangjiabin): Add other place support in next PR
-enum class PlaceType { kUNK = -1, kCPU, kGPU, kXPU, kNPU };
+// Load custom kernel api: register kernel after user compiled
+void LoadKernelMetaInfoAndRegisterKernel(const std::string& dso_name);
 
+// Register custom kernel api: register kernel directly
+void RegisterKernelWithMetaInfoMap(
+    const paddle::KernelMetaInfoMap& kernel_meta_info_map);
+
+// Interface for selective register custom kernel.
+void RegisterKernelWithMetaInfo(
+    const std::vector<KernelMetaInfo>& kernel_meta_infos);
+
+}  // namespace framework
 }  // namespace paddle

@@ -200,7 +200,8 @@ def setup(**attr):
     attr['zip_safe'] = False
 
     # switch `write_stub` to inject paddle api in .egg
-    with bootstrap_context():
+    is_kernel = attr.get('is_kernel', False)
+    with bootstrap_context(is_kernel):
         setuptools.setup(**attr)
 
 
@@ -295,6 +296,47 @@ def CUDAExtension(sources, *args, **kwargs):
         setuptools.Extension: An instance of setuptools.Extension
     """
     kwargs = normalize_extension_kwargs(kwargs, use_cuda=True)
+    # Note(Aurelius84): While using `setup` and `jit`, the Extension `name` will
+    # be replaced as `setup.name` to keep consistant with package. Because we allow
+    # users can not specific name in Extension.
+    # See `paddle.utils.cpp_extension.setup` for details.
+    name = kwargs.get('name', None)
+    if name is None:
+        name = _generate_extension_name(sources)
+
+    return setuptools.Extension(name, sources, *args, **kwargs)
+
+
+def AscendExtension(sources, *args, **kwargs):
+    """
+    The interface is used to config source files of customized operators and complies
+    Op Kernel supporting both CPU and GPU devices. Please use ``CppExtension`` if you want to
+    compile Op Kernel that supports only CPU device.
+    It further encapsulates python built-in ``setuptools.Extension`` .The arguments and
+    usage are same as the native interface, except for no need to explicitly specify
+    ``name`` .
+    **A simple example:**
+    .. code-block:: text
+        # setup.py
+        # Compiling customized operators supporting CPU and GPU devices
+        from paddle.utils.cpp_extension import AscendExtension, setup
+        setup(
+            name='custom_op',
+            ext_modules=AscendExtension(
+                sources=['relu_op.cc', 'relu_op.cu']
+            )
+        )
+    .. note::
+        It is mainly used in ``setup`` and the nama of built shared library keeps same
+        as ``name`` argument specified in ``setup`` interface.
+    Args:
+        sources(list[str]): Specify the C++/Ascend source files of customized operators.
+        *args(list[options], optional): Specify other arguments same as ``setuptools.Extension`` .
+        **kwargs(dict[option], optional): Specify other arguments same as ``setuptools.Extension`` .
+    Returns:
+        setuptools.Extension: An instance of setuptools.Extension
+    """
+    kwargs = normalize_extension_kwargs(kwargs, use_ascend=True)
     # Note(Aurelius84): While using `setup` and `jit`, the Extension `name` will
     # be replaced as `setup.name` to keep consistant with package. Because we allow
     # users can not specific name in Extension.
@@ -440,7 +482,10 @@ class BuildExtension(build_ext, object):
                 # so we add this flag to ensure the symbol names from user compiled
                 # shared library have same ABI suffix with core_(no)avx.so.
                 # See https://stackoverflow.com/questions/34571583/understanding-gcc-5s-glibcxx-use-cxx11-abi-or-the-new-abi
-                add_compile_flag(cflags, ['-D_GLIBCXX_USE_CXX11_ABI=1'])
+                if core.is_compiled_with_npu():
+                    add_compile_flag(['-D_GLIBCXX_USE_CXX11_ABI=0'], cflags)
+                else:
+                    add_compile_flag(['-D_GLIBCXX_USE_CXX11_ABI=1'], cflags)
                 # Append this macor only when jointly compiling .cc with .cu
                 if not is_cuda_file(src) and self.contain_cuda_file:
                     if core.is_compiled_with_rocm():
@@ -740,7 +785,8 @@ def load(name,
          extra_ldflags=None,
          extra_include_paths=None,
          build_directory=None,
-         verbose=False):
+         verbose=False,
+         is_kernel=False):
     """
     An Interface to automatically compile C++/CUDA source files Just-In-Time
     and return callable python function as other Paddle layers API. It will
@@ -856,7 +902,8 @@ def load(name,
                       extra_ldflags, verbose)
     _jit_compile(file_path, verbose)
 
-    # import as callable python api
-    custom_op_api = _import_module_from_library(name, build_base_dir, verbose)
+    # import as callable python api or kernel
+    custom_op_api = _import_module_from_library(name, build_base_dir, verbose,
+                                                is_kernel)
 
     return custom_op_api

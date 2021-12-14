@@ -1,11 +1,8 @@
 /* Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
     http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,9 +11,28 @@ limitations under the License. */
 
 #pragma once
 
+#include <string>
+#include <vector>
+
+#include "paddle/pten/api/ext/op_meta_info.h"
+#include "paddle/pten/core/kernel_factory.h"
+
 namespace paddle {
+namespace framework {
 
-// TODO(yangjiabin): Add other place support in next PR
-enum class PlaceType { kUNK = -1, kCPU, kGPU, kXPU, kNPU };
+class KernelMetaInfoHelper {
+ public:
+  static const std::string& GetOpName(const paddle::KernelMetaInfo& info) {
+    return info.op_name_;
+  }
+  static pten::KernelKey GetKernelKey(const paddle::KernelMetaInfo& info) {
+    return pten::KernelKey(info.backend_, info.layout_, info.dtype_);
+  }
+  static const CustomKernelFunc& GetKernelFn(
+      const paddle::KernelMetaInfo& info) {
+    return info.kernel_fn_;
+  }
+};
 
+}  // namespace framework
 }  // namespace paddle

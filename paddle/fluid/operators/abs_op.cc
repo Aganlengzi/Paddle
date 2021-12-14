@@ -159,7 +159,7 @@ REGISTER_OPERATOR(abs_grad, ops::AbsGradOp,
 REGISTER_OPERATOR(abs_grad_grad, ops::AbsDoubleGradOp);
 
 REGISTER_OP_CPU_KERNEL(
-    abs, ops::AbsKernel<paddle::platform::CPUDeviceContext, float>,
+    abs, /*ops::AbsKernel<paddle::platform::CPUDeviceContext, float>,*/
     ops::AbsKernel<paddle::platform::CPUDeviceContext, double>,
     ops::AbsKernel<paddle::platform::CPUDeviceContext, int>,
     ops::AbsKernel<paddle::platform::CPUDeviceContext, int64_t>,
