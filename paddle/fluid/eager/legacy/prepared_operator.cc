@@ -170,10 +170,12 @@ static void PreparedOpRunImpl(
   // TODO(zjl): remove scope in dygraph
   paddle::framework::Scope scope;
 
+  VLOG(3) << "BEFORE:";
   EagerInferShapeContext infer_shape_ctx(&ins, &outs, &attrs, &default_attrs,
                                          op.Type());
   static_cast<const paddle::framework::OperatorWithKernel&>(op).InferShape(
       &infer_shape_ctx);
+  VLOG(3) << "AFTER:";
 
   func(EagerExecutionContext(op, scope, *dev_ctx, ctx, ins, outs, attrs,
                              default_attrs));

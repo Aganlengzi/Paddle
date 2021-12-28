@@ -63,6 +63,9 @@ KernelMetaInfoBuilder::KernelMetaInfoBuilder(std::string&& op_name,
   if (data_type == "float") {
     dtype_ = pten::DataType::FLOAT32;
   }
+  if (data_type == "int64_t") {
+    dtype_ = pten::DataType::INT64;
+  }
   op_name_ = std::forward<std::string>(op_name);
 
   // 2. check and meta info build
@@ -113,9 +116,27 @@ void LoadCustomKernelLib(const std::string& dso_name) {
 extern "C" {
 #endif
 
-int PD_NumInputs(const paddle::PD_ExecutionContext* ctx) {
+// PD_Status
+PD_Status* PD_NewStatus() { return new PD_Status; }
+
+void PD_DeleteStatus(PD_Status* s) { delete s; }
+
+// PD_Tensor
+int64_t PD_TensorElementCount(const PD_Tensor* t) { return t->tensor->numel(); }
+
+std::vector<int64_t> PD_TensorShape(const PD_Tensor* t) {
+  return t->tensor->shape();
+}
+
+void* PD_TensorData(const PD_Tensor* t) {
+  return std::dynamic_pointer_cast<pten::DenseTensor>(t->tensor->impl())
+      ->mutable_data();
+}
+
+// PD_Register
+int PD_NumInputs(const PD_ExecutionContext* ctx) {
   auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
-      const_cast<paddle::PD_ExecutionContext*>(ctx));
+      const_cast<PD_ExecutionContext*>(ctx));
   auto innamelist = cc_ctx->InNameList();
   for (auto& input : innamelist) {
     std::cout << "PD_NumInputs: " << input << std::endl;
@@ -123,10 +144,11 @@ int PD_NumInputs(const paddle::PD_ExecutionContext* ctx) {
   return static_cast<int>(innamelist.size());
 }
 
-const paddle::Tensor* PD_GetInput(const paddle::PD_ExecutionContext* ctx,
-                                  const std::string& name) {
+void PD_GetInput(const PD_ExecutionContext* ctx,
+                 const std::string& name,
+                 PD_Tensor** tensor) {
   auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
-      const_cast<paddle::PD_ExecutionContext*>(ctx));
+      const_cast<PD_ExecutionContext*>(ctx));
 
   auto* x = cc_ctx->Input<paddle::framework::Tensor>(name);
 
@@ -137,14 +159,15 @@ const paddle::Tensor* PD_GetInput(const paddle::PD_ExecutionContext* ctx,
                     true,
                     paddle::platform::errors::InvalidArgument(
                         "Input tensor (%s) is not initialized.", name));
+
   auto* ret = new paddle::Tensor();
   ret->set_impl(std::move(paddle::experimental::MakePtenDenseTensor(*x)));
-  return ret;
+  *tensor = new PD_Tensor{ret};
 }
 
-void* PD_GetStream(const paddle::PD_ExecutionContext* ctx) {
+void* PD_GetStream(const PD_ExecutionContext* ctx) {
   auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
-      const_cast<paddle::PD_ExecutionContext*>(ctx));
+      const_cast<PD_ExecutionContext*>(ctx));
 
 #ifdef PADDLE_WITH_ASCEND_CL
   return cc_ctx->template device_context<paddle::platform::NPUDeviceContext>()
@@ -152,11 +175,11 @@ void* PD_GetStream(const paddle::PD_ExecutionContext* ctx) {
 #endif
 }
 
-void PD_SetOutput(const paddle::PD_ExecutionContext* ctx,
+void PD_SetOutput(const PD_ExecutionContext* ctx,
                   const std::string& name,
                   paddle::Tensor& out) {
   auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
-      const_cast<paddle::PD_ExecutionContext*>(ctx));
+      const_cast<PD_ExecutionContext*>(ctx));
 
   auto* x = cc_ctx->Output<paddle::framework::Tensor>(name);
   PADDLE_ENFORCE_NOT_NULL(x,
@@ -165,6 +188,40 @@ void PD_SetOutput(const paddle::PD_ExecutionContext* ctx,
 
   paddle::experimental::MovesStorage(
       std::dynamic_pointer_cast<pten::DenseTensor>(out.impl()).get(), x);
+}
+
+std::vector<int64_t> PD_GetOutputShape(const PD_ExecutionContext* ctx,
+                                       const std::string& name) {
+  auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
+      const_cast<PD_ExecutionContext*>(ctx));
+  auto* x = cc_ctx->Output<paddle::framework::Tensor>(name);
+  PADDLE_ENFORCE_NOT_NULL(x,
+                          paddle::platform::errors::NotFound(
+                              "Output tensor (%s) is nullptr.", name));
+  return paddle::framework::vectorize<int64_t>(x->dims());
+}
+
+PD_Tensor* PD_AllocateOutput(const PD_ExecutionContext* ctx,
+                             const std::string& name,
+                             PD_DataType dtype,
+                             const int64_t* dims,
+                             int num_dims) {
+  auto* cc_ctx = reinterpret_cast<paddle::framework::ExecutionContext*>(
+      const_cast<PD_ExecutionContext*>(ctx));
+  auto* x = cc_ctx->Output<paddle::framework::Tensor>(name);
+  PADDLE_ENFORCE_NOT_NULL(x,
+                          paddle::platform::errors::NotFound(
+                              "Output tensor (%s) is nullptr.", name));
+  if (num_dims) {
+    std::vector<int64_t> shape(dims, dims + num_dims);
+    x->Resize(paddle::framework::make_ddim(shape));
+  }
+  x->mutable_data(
+      cc_ctx->GetPlace(),
+      pten::TransToProtoVarType(static_cast<pten::DataType>(dtype)));
+  auto* ret = new paddle::Tensor();
+  ret->set_impl(std::move(paddle::experimental::MakePtenDenseTensor(*x)));
+  return new PD_Tensor{ret};
 }
 
 #ifndef _WIN32

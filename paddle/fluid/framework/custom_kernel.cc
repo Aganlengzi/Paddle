@@ -68,8 +68,7 @@ static void RunCustomKernelFunc(const framework::ExecutionContext& ctx,
                                 const paddle::CustomKernelFunc& func) {
   VLOG(4) << "Custom Kernel: Run ComputeFunc.";
   try {
-    func(reinterpret_cast<PD_ExecutionContext*>(
-        const_cast<ExecutionContext*>(&ctx)));
+    func(reinterpret_cast<const PD_ExecutionContext*>(&ctx));
   } catch (platform::EnforceNotMet& exception) {
     throw std::move(exception);
   } catch (std::exception& ex) {

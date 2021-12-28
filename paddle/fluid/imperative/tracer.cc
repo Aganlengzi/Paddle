@@ -209,7 +209,7 @@ void Tracer::TraceOp(const std::string& type, const NameVarBaseMap& ins,
           "PaddlePaddle should compile with NPU if use NPUPlace."));
 #endif
     }
-
+    VLOG(3) << "BEFORE run: ";
     OpBase::Run(*op, new_ins, outs, attrs, default_attrs, place);
   } catch (platform::EnforceNotMet& exception) {
     framework::AppendErrorOpHint(type, &exception);

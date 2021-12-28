@@ -30,6 +30,7 @@ class AbsOp : public framework::OperatorWithKernel {
   using framework::OperatorWithKernel::OperatorWithKernel;
 
   void InferShape(framework::InferShapeContext* ctx) const override {
+    VLOG(1) << "In AbsOp InferShape";
     OP_INOUT_CHECK(ctx->HasInput("X"), "Input", "X", "abs");
     OP_INOUT_CHECK(ctx->HasOutput("Out"), "Output", "Out", "abs");
 

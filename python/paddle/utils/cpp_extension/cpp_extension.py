@@ -201,6 +201,8 @@ def setup(**attr):
 
     # switch `write_stub` to inject paddle api in .egg
     is_kernel = attr.get('is_kernel', False)
+    if 'is_kenel' in attr:
+        del attr['is_kernel']
     with bootstrap_context(is_kernel):
         setuptools.setup(**attr)
 

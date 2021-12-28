@@ -227,7 +227,7 @@ PreparedOp PrepareImpl(const NameVarMap<VarType>& ins,
   if (!(expected_kernel_key.place_ == place)) {
     dev_ctx = pool.Get(expected_kernel_key.place_);
   }
-
+  VLOG(3) << "Before PreparedOp:";
   return PreparedOp(op, ctx, expected_kernel_key, kernel_iter->second, dev_ctx);
 }
 
@@ -474,10 +474,12 @@ static void PreparedOpRunImpl(
   // TODO(zjl): remove scope in dygraph
   framework::Scope scope;
 
+  VLOG(3) << "BEFORE infer_shape";
   DygraphInferShapeContext<VarType> infer_shape_ctx(&ins, &outs, &attrs,
                                                     &default_attrs, op.Type());
   static_cast<const framework::OperatorWithKernel&>(op).InferShape(
       &infer_shape_ctx);
+  VLOG(3) << "AFTER infer_shape";
 
   func(DygraphExecutionContext<VarType>(op, scope, *dev_ctx, ctx, ins, outs,
                                         attrs, default_attrs));

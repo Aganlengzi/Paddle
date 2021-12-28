@@ -65,6 +65,9 @@ class NPUStream final {
   DISABLE_COPY_AND_ASSIGN(NPUStream);
 };
 
+NPUStream* get_current_stream(int deviceId);
+NPUStream* set_current_stream(NPUStream* stream);
+
 #endif
 
 }  // namespace stream

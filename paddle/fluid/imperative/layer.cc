@@ -468,10 +468,12 @@ static void OpBaseRunImpl(const framework::OperatorBase& op,
    * after the execution of op, but the original input is directly
    * overwritten in the previous dynamic graph implemention.
    */
+  VLOG(4) << "BEFORE PreparedOp::Prepare";
   auto prepared_op = PreparedOp::Prepare(ins, outs, *op_kernel, place, attrs,
                                          default_attrs, pt_kernel_context);
   auto tmp_ins_ptr =
       PrepareData<VarType>(*op_kernel, ins, prepared_op.kernel_type());
+  VLOG(4) << "BEFORE prepared_op.Run";
   if (tmp_ins_ptr == nullptr) {
     prepared_op.Run(ins, outs, attrs, default_attrs);
   } else {

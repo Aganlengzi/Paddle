@@ -32,6 +32,7 @@ limitations under the License. */
  * Used to maintain operator core information.
  *
  */
+typedef struct PD_ExecutionContext PD_ExecutionContext;
 
 namespace paddle {
 namespace framework {
@@ -39,8 +40,6 @@ class PADDLE_API KernelMetaInfoHelper;
 }  // namespace framework
 
 using Tensor = paddle::Tensor;
-
-typedef struct PD_ExecutionContext PD_ExecutionContext;
 
 using CustomKernelFunc = void (*)(const PD_ExecutionContext*);
 
@@ -144,10 +143,10 @@ void LoadCustomKernelLib(const std::string& dso_name);
 //     .Attrs({"axis"})
 //     .SetKernelFn(PD_KERNEL(CustomKernelFunc<float>));
 
-#define PD_REGISTER_KERNEL(op_name, device, layout, dtype)           \
+#define PD_BUILD_KERNEL(op_name, device, layout, dtype)              \
   STATIC_ASSERT_GLOBAL_NAMESPACE(                                    \
       __reg_kernel__##op_name##_##device##_##layout##_##dtype,       \
-      "PD_REGISTER_KERNEL must be called in global namespace.");     \
+      "PD_RBUILD_KERNEL must be called in global namespace.");       \
   static ::paddle::KernelMetaInfoBuilder                             \
       __kernel_meta_info_##op_name##_##device##_##layout##_##dtype = \
           ::paddle::KernelMetaInfoBuilder(#op_name, #device, #layout, #dtype)
@@ -160,14 +159,68 @@ void LoadCustomKernelLib(const std::string& dso_name);
 extern "C" {
 #endif
 
-PADDLE_API int PD_NumInputs(const paddle::PD_ExecutionContext* ctx);
+// pten::DataType
+typedef enum PD_DataType {
+  PD_UNDEFINED = 0,
+  PD_BOOL,
+  PD_INT8,   // Char
+  PD_UINT8,  // BYte
+  PD_INT16,
+  PD_INT32,
+  PD_UINT32,
+  PD_INT64,
+  PD_UINT64,
+  PD_BFLOAT16,
+  PD_FLOAT16,
+  PD_UINT16,
+  PD_FLOAT32,
+  PD_FLOAT64,
+  PD_COMPLEX64,
+  PD_COMPLEX128,
+  PD_NUM_DATA_TYPES
+} PD_DataType;
 
-PADDLE_API const paddle::Tensor* PD_GetInput(
-    const paddle::PD_ExecutionContext* ctx, const std::string& name);
+// PD_Status
+typedef struct PD_Status {
+  int64_t s;
 
-PADDLE_API void* PD_GetStream(const paddle::PD_ExecutionContext* ctx);
+  PD_Status() { s = 0; }
+} PD_Status;
 
-PADDLE_API void PD_SetOutput(const paddle::PD_ExecutionContext* ctx,
+PADDLE_API PD_Status* PD_NewStatus();
+
+PADDLE_API void PD_DeleteStatus(PD_Status* s);
+
+// PD_Tensor
+typedef struct PD_Tensor { paddle::Tensor* tensor; } PD_Tensor;
+
+PADDLE_API int64_t PD_TensorElementCount(const PD_Tensor* t);
+
+PADDLE_API std::vector<int64_t> PD_TensorShape(const PD_Tensor* t);
+
+PADDLE_API void* PD_TensorData(const PD_Tensor* t);
+
+// PD_Register
+// typedef struct PD_ExecutionContext PD_ExecutionContext;
+
+PADDLE_API int PD_NumInputs(const PD_ExecutionContext* ctx);
+
+PADDLE_API void PD_GetInput(const PD_ExecutionContext* ctx,
+                            const std::string& name,
+                            PD_Tensor** tensor);
+
+PADDLE_API std::vector<int64_t> PD_GetOutputShape(
+    const PD_ExecutionContext* ctx, const std::string& name);
+
+PADDLE_API PD_Tensor* PD_AllocateOutput(const PD_ExecutionContext* ctx,
+                                        const std::string& name,
+                                        PD_DataType dtype,
+                                        const int64_t* dims,
+                                        int num_dims);
+
+PADDLE_API void* PD_GetStream(const PD_ExecutionContext* ctx);
+
+PADDLE_API void PD_SetOutput(const PD_ExecutionContext* ctx,
                              const std::string& name,
                              paddle::Tensor& out);
 

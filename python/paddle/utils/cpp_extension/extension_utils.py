@@ -130,8 +130,8 @@ def load_op_meta_info_and_register_op(lib_filename):
     return OpProtoHolder.instance().update_op_proto()
 
 
-def load_kernel_meta_info_and_register_kernel(lib_filename):
-    core.load_kernel_meta_info_and_register_kernel(lib_filename)
+def load_custom_kernel(lib_filename):
+    core.load_custom_kernel(lib_filename)
 
 
 def custom_kernel_write_stub(resource, pyfile):
@@ -148,7 +148,7 @@ def custom_kernel_write_stub(resource, pyfile):
             so_path = os.path.join(cur_dir, "{resource}")
             assert os.path.exists(so_path)
             # load custom op shared library with abs path
-            paddle.utils.cpp_extension.load_kernel_meta_info_and_register_kernel(so_path)
+            paddle.utils.cpp_extension.load_custom_kernel(so_path)
         
         __bootstrap__()
         """).lstrip()
@@ -932,7 +932,7 @@ def _import_module_from_library(module_name,
     # load custom op_info and kernels from .so shared library
     log_v('loading shared library from: {}'.format(ext_path), verbose)
     if is_kernel:
-        core.load_kernel_meta_info_and_register_kernel(ext_path)
+        core.load_custom_kernel(ext_path)
         return None
     else:
         op_names = load_op_meta_info_and_register_op(ext_path)
