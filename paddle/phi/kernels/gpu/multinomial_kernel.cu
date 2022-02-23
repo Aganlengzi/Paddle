@@ -1,4 +1,4 @@
-/* Copyright (c) 2020 PaddlePaddle Authors. All Rights Reserved.
+/* Copyright (c) 2022 PaddlePaddle Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,20 +16,20 @@ limitations under the License. */
 // To-do(qili93): fix this after issue resolved
 // https://github.com/ROCmSoftwarePlatform/rocPRIM/issues/202
 
+#include "paddle/phi/kernels/multinomial_kernel.h"
+
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/scan.h>
 #include <thrust/transform.h>
 
-#include "paddle/fluid/framework/eigen.h"
-#include "paddle/fluid/framework/op_registry.h"
-#include "paddle/fluid/framework/operator.h"
-#include "paddle/fluid/operators/multinomial_op.h"
-#include "paddle/fluid/platform/enforce.h"
+#include "paddle/phi/backends/gpu/gpu_context.h"
+#include "paddle/phi/core/kernel_registry.h"
 #include "paddle/fluid/platform/transform.h"
+#include "paddle/phi/kernels/funcs/eigen/common.h"
+#include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
 
-namespace paddle {
-namespace operators {
+namespace phi {
 
 template <typename T>
 __global__ void NormalizeProbability(T* norm_probs, const T* in_data,
@@ -126,21 +126,18 @@ __global__ void sampleMultinomialWithReplacement(
   }
 }
 
-template <typename T>
-class MultinomialOpKernel<platform::CUDADeviceContext, T>
-    : public framework::OpKernel<T> {
- public:
-  void Compute(const framework::ExecutionContext& ctx) const override {
-    const auto x = ctx.Input<framework::Tensor>("X");
-    auto out = ctx.Output<framework::Tensor>("Out");
+template <typename T, typename Context>
+void MultinomialKernel(const Context& dev_ctx,
+                  const DenseTensor& x,
+                  int num_samples,
+                  bool replacement,
+                  DenseTensor* out) {
+    const int64_t num_samples = static_cast<int64_t>(num_samples);
 
-    const int64_t num_samples = ctx.Attr<int>("num_samples");
-    const bool replacement = ctx.Attr<bool>("replacement");
+    auto* in_data = x.data<T>();
+    int64_t* out_data = dev_ctx.template Alloc<int64_t>(out);
 
-    auto* in_data = x->data<T>();
-    int64_t* out_data = out->mutable_data<int64_t>(ctx.GetPlace());
-
-    auto in_dims = x->dims();
+    auto in_dims = x.dims();
     int64_t in_rank = in_dims.size();
     const int64_t num_categories = in_dims[in_rank - 1];
     const int64_t num_distributions = in_rank > 1 ? in_dims[in_rank - 2] : 1;
@@ -151,7 +148,7 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     // will change. The implementation can't be parallelizable. Thus, call CPU
     // implementation ``MultinomialFunctor`` to sample the distribution.
     if (!replacement) {
-      int64_t in_data_numel = x->numel();
+      int64_t in_data_numel = x.numel();
       int64_t out_data_numel = out->numel();
 
       T* cpu_in_data = new T[in_data_numel];
@@ -185,21 +182,20 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     // sum of each row of input, and then use the sum to normalize the input.
     // sum_row_data: sum of each row
     framework::Tensor sum_rows_tensor;
-    auto* sum_rows_data =
-        sum_rows_tensor.mutable_data<T>({num_distributions}, ctx.GetPlace());
+    sum_rows_tensor.Resize({num_distributions});
+    auto* sum_rows_data = dev_ctx.template Alloc<T>(&sum_rows_tensor);
 
-    auto& place = *ctx.template device_context<platform::CUDADeviceContext>()
-                       .eigen_device();
+    auto& place = *dev_ctx.eigen_device();
 
     if (num_distributions == 1) {
-      auto eigen_input = framework::EigenVector<T>::Flatten(*x);
+      auto eigen_input = framework::EigenVector<T>::Flatten(x);
       auto eigen_sum_rows = framework::EigenVector<T>::Flatten(sum_rows_tensor);
       eigen_sum_rows.device(place) =
           eigen_input.sum(Eigen::DSizes<int, 1>(1))
               .eval()
               .reshape(Eigen::DSizes<int, 1>(sum_rows_tensor.dims()[0]));
     } else {
-      auto eigen_input = framework::EigenMatrix<T>::From(*x);
+      auto eigen_input = framework::EigenMatrix<T>::From(x);
       auto eigen_sum_rows = framework::EigenVector<T>::Flatten(sum_rows_tensor);
       eigen_sum_rows.device(place) = eigen_input.sum(Eigen::DSizes<int, 1>(1));
     }
@@ -208,14 +204,14 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     // 1].
     // norm_probs_data: probability of the distribution
     framework::Tensor norm_probs_tensor;
-    auto* norm_probs_data = norm_probs_tensor.mutable_data<T>(
-        {num_distributions, num_categories}, ctx.GetPlace());
+    norm_probs_tensor.Resize({num_distributions, num_categories});
+    auto* norm_probs_data = dev_ctx.template Alloc<T>(&norm_probs_tensor);
 
     // number of threads in a block is min(num_categories, 512)
     dim3 block_norm(num_categories < 512 ? num_categories : 512);
     dim3 grid_norm((num_distributions * num_categories - 1) / block_norm.x + 1);
     NormalizeProbability<
-        T><<<grid_norm, block_norm, 0, ctx.cuda_device_context().stream()>>>(
+        T><<<grid_norm, block_norm, 0, dev_ctx.stream()>>>(
         norm_probs_data, in_data, sum_rows_data, num_distributions,
         num_categories);
 
@@ -223,12 +219,13 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     // of
     // ``cumsum`` op.
     framework::Tensor cumulative_probs_tensor;
-    auto* cumulative_probs = cumulative_probs_tensor.mutable_data<T>(
-        {num_distributions, num_categories}, ctx.GetPlace());
+    cumulative_probs_tensor.Resize({num_distributions, num_categories});
+    auto* cumulative_probs = dev_ctx.template Alloc<T>(&cumulative_probs_tensor);
+
     dim3 block_cumsum(1);
     dim3 grid_cumsum(num_distributions);
     GetCumulativeProbs<T><<<grid_cumsum, block_cumsum, 0,
-                            ctx.cuda_device_context().stream()>>>(
+                            dev_ctx.stream()>>>(
         norm_probs_data, num_distributions, num_categories, cumulative_probs);
 
     // Generate random number for each sample.
@@ -236,14 +233,12 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     auto seed = rd();
 
     framework::Tensor rng_data_tensor;
-    auto* rng_data = rng_data_tensor.mutable_data<T>(
-        {num_distributions, num_samples}, ctx.GetPlace());
+    rng_data_tensor.Resize({num_distributions, num_samples});
+    auto* rng_data = dev_ctx.template Alloc<T>(&rng_data_tensor);
 
     thrust::counting_iterator<int64_t> index_sequence_begin(0);
-    platform::Transform<platform::CUDADeviceContext> trans;
-    auto* context =
-        static_cast<const platform::CUDADeviceContext*>(&ctx.device_context());
-    trans(*context, index_sequence_begin,
+    paddle::platform::Transform<GPUContext> trans;
+    trans(dev_ctx, index_sequence_begin,
           index_sequence_begin + num_distributions * num_samples, rng_data,
           RandomGeneratorCudaFunctor<T>(seed));
 
@@ -251,20 +246,18 @@ class MultinomialOpKernel<platform::CUDADeviceContext, T>
     dim3 block_sample(128);
     dim3 grid_sample((num_samples - 1) / block_sample.x + 1, num_distributions);
     sampleMultinomialWithReplacement<T><<<grid_sample, block_sample, 0,
-                                          ctx.cuda_device_context().stream()>>>(
+                                          dev_ctx.stream()>>>(
         rng_data, num_samples, out_data, num_distributions, num_categories,
-        cumulative_probs, norm_probs_data);
-  }
-};
+        cumulative_probs, norm_probs_data);             
+}
 
-}  // namespace operators
-}  // namespace paddle
+}   // namespace phi
 
-namespace ops = paddle::operators;
-namespace plat = paddle::platform;
-
-REGISTER_OP_CUDA_KERNEL(
-    multinomial, ops::MultinomialOpKernel<plat::CUDADeviceContext, double>,
-    ops::MultinomialOpKernel<plat::CUDADeviceContext, float>);
+PD_REGISTER_KERNEL(multinomial,
+                   GPU,
+                   ALL_LAYOUT,
+                   phi::MultinomialKernel,
+                   float,
+                   double) {}
 
 #endif
