@@ -26,7 +26,7 @@ KernelSignature AddmmGradOpArgumentMapping(const ArgumentMappingContext& ctx) {
       "addmm_grad",
       {"Input", "X", "Y", GradVarName("Out")},
       {"Alpha", "Beta"},
-      {GradVarName("Input"), GradVarName("X"), GradVarName("X")});
+      {GradVarName("Input"), GradVarName("X"), GradVarName("Y")});
 }
 
 }  // namespace phi
