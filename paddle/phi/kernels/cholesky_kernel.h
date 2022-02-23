@@ -15,14 +15,13 @@ limitations under the License. */
 #pragma once
 
 #include "paddle/phi/core/dense_tensor.h"
-#include "paddle/phi/core/device_context.h"
 
 namespace phi {
 
 template <typename T, typename Context>
 void CholeskyKernel(const Context& dev_ctx,
-                const DenseTensor& x,
-                bool upper,
-                DenseTensor* out);
+                    const DenseTensor& x,
+                    bool upper,
+                    DenseTensor* out);
 
 }  // namespace phi

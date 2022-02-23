@@ -14,8 +14,6 @@
 
 #include "paddle/fluid/framework/op_registry.h"
 
-#include <string>
-
 namespace paddle {
 namespace framework {
 class InferShapeContext;
@@ -100,5 +98,4 @@ class IncrementGradOpMaker : public framework::SingleGradOpMaker<T> {
 namespace ops = paddle::operators;
 REGISTER_OPERATOR(increment, ops::IncrementOp, ops::IncrementOpMaker,
                   ops::IncrementGradOpMaker<paddle::framework::OpDesc>,
-                  ops::IncrementGradOpMaker<paddle::imperative::OpBase>,
-                  IncrementInferShapeFunctor);
+                  ops::IncrementGradOpMaker<paddle::imperative::OpBase>);

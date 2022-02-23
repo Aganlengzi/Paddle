@@ -14,22 +14,24 @@ limitations under the License. */
 
 #pragma once
 
-#include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/kernels/funcs/eigen/common.h"
 #include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
+#include "paddle/phi/kernels/increment_kernel.h"
 
 namespace phi {
 
 template <typename T, typename Context>
 void IncrementKernel(const Context& dev_ctx,
-                const DenseTensor& x,
-                float value,
-                DenseTensor* out) {
+                     const DenseTensor& x,
+                     float value,
+                     DenseTensor* out) {
   dev_ctx.template Alloc<T>(out);
   auto& dev = *dev_ctx.eigen_device();
-  phi::funcs::EigenAdd<std::decay_t<decltype(dev)>, T>::Eval(
-        dev, phi::EigenScalar<T>::From(*out),
-        phi::EigenScalar<T>::From(x), static_cast<T>(value));
+  funcs::EigenAdd<std::decay_t<decltype(dev)>, T>::Eval(
+      dev,
+      EigenScalar<T>::From(*out),
+      EigenScalar<T>::From(x),
+      static_cast<T>(value));
 }
 
 }  // namespace phi
