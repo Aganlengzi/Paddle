@@ -14,7 +14,9 @@
 
 #pragma once
 
+#ifndef PADDLE_WITH_CUSTOM_KERNEL
 #include "paddle/phi/api/lib/utils/storage.h"
+#endif
 #include "paddle/phi/common/scalar_array.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/infermeta/nullary.h"
@@ -34,6 +36,7 @@ void EmptyLikeKernel(const Context& dev_ctx,
                      DataType dtype,
                      DenseTensor* out);
 
+#ifndef PADDLE_WITH_CUSTOM_KERNEL
 // TODO(chenweihang): the tensor creation method need to be replaced later,
 // all kernel api call Empty here instead of making tensor self
 template <typename Context>
@@ -44,6 +47,7 @@ DenseTensor Empty(const Context& dev_ctx, DenseTensorMeta&& meta) {
       std::move(meta));
   return dense_out;
 }
+#endif
 
 template <typename T, typename Context>
 DenseTensor Empty(const Context& dev_ctx) {

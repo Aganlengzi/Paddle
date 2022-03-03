@@ -88,7 +88,7 @@ class CustomDevice : public DeviceInterface {
       ok = false;
     }
     if (dso_handle_) {
-      dlclose(dso_handle_);
+      // dlclose(dso_handle_);
       dso_handle_ = nullptr;
     }
     if (!ok) {
