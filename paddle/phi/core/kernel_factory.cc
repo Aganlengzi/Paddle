@@ -17,6 +17,8 @@
 #include "glog/logging.h"
 #include "paddle/phi/core/enforce.h"
 
+DECLARE_bool(enable_api_kernel_fallback);
+
 namespace phi {
 
 const static Kernel empty_kernel;  // NOLINT
@@ -122,17 +124,31 @@ KernelResult KernelFactory::SelectKernelOrThrowError(
 
   bool has_fallback_cpu = false;
   if (kernel_iter == iter->second.end()) {
-    // Fallback CPU backend
-    phi::KernelKey cpu_kernel_key(
-        phi::Backend::CPU, kernel_key.layout(), kernel_key.dtype());
-    kernel_iter = iter->second.find(cpu_kernel_key);
-    if (kernel_iter == iter->second.end() &&
-        kernel_key.layout() != phi::DataLayout::ALL_LAYOUT) {
-      phi::KernelKey any_layout_kernel_key(
-          phi::Backend::CPU, phi::DataLayout::ALL_LAYOUT, kernel_key.dtype());
-      kernel_iter = iter->second.find(any_layout_kernel_key);
+    if (FLAGS_enable_api_kernel_fallback) {
+      // Fallback CPU backend
+      phi::KernelKey cpu_kernel_key(
+          phi::Backend::CPU, kernel_key.layout(), kernel_key.dtype());
+      kernel_iter = iter->second.find(cpu_kernel_key);
+      if (kernel_iter == iter->second.end() &&
+          kernel_key.layout() != phi::DataLayout::ALL_LAYOUT) {
+        phi::KernelKey any_layout_kernel_key(
+            phi::Backend::CPU, phi::DataLayout::ALL_LAYOUT, kernel_key.dtype());
+        kernel_iter = iter->second.find(any_layout_kernel_key);
+      }
+      if (kernel_iter != iter->second.end()) {
+        has_fallback_cpu = true;
+
+        VLOG(3) << "missing " << kernel_key.backend()
+                << " kernel: " << kernel_name
+                << ", expected_kernel_key:" << kernel_key
+                << ", fallbacking to CPU one!";
+      }
+    } else {
+      LOG(WARNING) << kernel_key.backend() << " kernel: " << kernel_name
+                   << " is not registered and FLAGS_enable_api_kernel_fallback "
+                   << " is false(default true). If you want to fallback it to "
+                   << " CPU one, please set the flag as true before run again.";
     }
-    has_fallback_cpu = true;
   }
 
   PADDLE_ENFORCE_NE(
